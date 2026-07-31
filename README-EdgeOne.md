@@ -1,6 +1,6 @@
 # 舞刀 · EdgeOne Pages 部署说明
 
-本仓库已经适配 EdgeOne Pages：网页静态文件由 Pages 托管，`edge-functions/api/[[default]].js` 处理 `/api/*` 的 B 站解析、登录和媒体流代理。
+本仓库已经适配 EdgeOne Pages：网页静态文件由 Pages 托管，函数处理 `/api/*` 的 B 站解析、登录和媒体流代理。为兼容 Pages 旧版与 Makers 新版，仓库同时提供 `functions/api/[[default]].js` 和 `edge-functions/api/[[default]].js` 两种目录约定。
 
 ## 已支持的功能
 
