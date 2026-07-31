@@ -1,2 +1,2 @@
-# 舞刀 服务端依赖（仅扫码登录用到 qrcode，其余为标准库）
-qrcode>=7.0
+# 项目运行只依赖 Python 标准库。
+# 本地与 EdgeOne 的扫码二维码均由浏览器端 JavaScript 生成。

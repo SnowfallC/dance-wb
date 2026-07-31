@@ -1,6 +1,6 @@
 /* sw.js —— 极简离线缓存（network-first，避免开发期旧缓存） */
-const CACHE = "dance-wb-v42";
-const CORE = ["./index.html", "./style.css", "./js/util.js", "./js/store.js", "./js/player.js", "./js/favorites.js", "./js/calendar.js", "./js/split.js", "./js/home.js", "./js/app.js", "./manifest.webmanifest", "./icon.svg", "./cover.svg"];
+const CACHE = "dance-wb-v43";
+const CORE = ["./index.html", "./style.css", "./js/vendor/qrcode.min.js", "./js/util.js", "./js/store.js", "./js/player.js", "./js/favorites.js", "./js/calendar.js", "./js/split.js", "./js/home.js", "./js/app.js", "./manifest.webmanifest", "./icon.svg", "./cover.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));

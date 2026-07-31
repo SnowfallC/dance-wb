@@ -20,12 +20,17 @@ import threading
 import urllib.parse
 import urllib.request
 import http.cookiejar
+import http.cookies
 import base64
 import io
-import qrcode
 import subprocess
 import tempfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    import qrcode
+except ModuleNotFoundError:
+    qrcode = None
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -244,11 +249,15 @@ def bili_qr_generate():
     url = d.get("url")
     if not key or not url:
         raise RuntimeError("获取二维码失败")
+    result = {"key": key, "url": url}
+    if qrcode is None:
+        return result
     img = qrcode.make(url, box_size=8, border=2)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return {"key": key, "dataUrl": "data:image/png;base64," + b64}
+    result["dataUrl"] = "data:image/png;base64," + b64
+    return result
 
 
 def bili_qr_poll(key):
@@ -260,7 +269,7 @@ def bili_qr_poll(key):
         return {"status": "expired"}
     if code == 86039:
         return {"status": "scanned"}
-        return {"status": "waiting"}
+    return {"status": "waiting"}
 
 
 def bili_check_login(cookie):
@@ -282,15 +291,32 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # 静默日志，避免刷屏
 
-    def _send_json(self, obj, code=200):
+    def _send_json(self, obj, code=200, extra_headers=None):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _session_cookie(self):
+        raw = self.headers.get("Cookie", "")
+        parsed = http.cookies.SimpleCookie()
+        try:
+            parsed.load(raw)
+            value = parsed.get("danceBiliCookie")
+            return value.value if value else ""
+        except (http.cookies.CookieError, ValueError):
+            return ""
+
+    def _session_header(self, cookie, clear=False):
+        max_age = 0 if clear else 2592000
+        value = "" if clear else urllib.parse.quote(cookie, safe="")
+        return f"danceBiliCookie={value}; Path=/api; Max-Age={max_age}; HttpOnly; SameSite=Strict"
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -338,7 +364,7 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = int((qs.get("qn") or ["32"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
@@ -351,7 +377,7 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
@@ -416,7 +442,7 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
@@ -458,7 +484,7 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         cache_path = self._bili_cache_path(bvid, cid, qn, cookie)
@@ -499,7 +525,7 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = (qs.get("qn") or [""])[0]
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         try:
             if bvid and cid and qn:
                 p = self._bili_cache_path(bvid, cid, int(qn), cookie)
@@ -576,11 +602,28 @@ class Handler(SimpleHTTPRequestHandler):
             return self._send_json({"error": "缺少 url"}, 400)
         if not target.startswith("https://"):
             return self._send_json({"error": "仅支持 https 直链"}, 400)
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         return self._proxy_url(target, cookie=cookie)
 
     def do_POST(self):
-        return self._send_json({"error": "not found"}, 404)
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/api/bili/session":
+            return self._send_json({"error": "not found"}, 404)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            cookie = str(payload.get("cookie", "")).strip()
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            return self._send_json({"error": "登录信息无效"}, 400)
+        if not cookie or len(cookie) > 3000:
+            return self._send_json({"error": "登录信息无效"}, 400)
+        return self._send_json({"ok": True}, extra_headers={"Set-Cookie": self._session_header(cookie)})
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/api/bili/session":
+            return self._send_json({"error": "not found"}, 404)
+        return self._send_json({"ok": True}, extra_headers={"Set-Cookie": self._session_header("", clear=True)})
 
     def _api_bili_qr_gen(self):
         try:
@@ -593,12 +636,15 @@ class Handler(SimpleHTTPRequestHandler):
         if not key:
             return self._send_json({"error": "缺少 key"}, 400)
         try:
-            self._send_json(bili_qr_poll(key))
+            result = bili_qr_poll(key)
+            cookie = result.pop("cookie", "")
+            headers = {"Set-Cookie": self._session_header(cookie)} if cookie else None
+            self._send_json(result, extra_headers=headers)
         except Exception as e:
             self._send_json({"error": f"轮询失败：{e}"}, 502)
 
     def _api_bili_check(self, qs):
-        cookie = (qs.get("cookie") or [""])[0] or None
+        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
         if not cookie:
             return self._send_json({"loggedIn": False, "reason": "no_cookie"})
         try:

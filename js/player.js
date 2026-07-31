@@ -53,13 +53,13 @@
       const qn = parseInt(e.target.value, 10);
       const t = video.currentTime || 0;
       curSource.qn = qn;
-      // 高清需服务端合并；未登录时 B 站只给 480p，提示先扫码登录
+      // EdgeOne 使用流式代理，不依赖服务端合并或磁盘缓存
       if (qn >= 64) {
         const hint = document.getElementById("qnHint");
         if (!getBiliCookie || !getBiliCookie()) {
-          hint.textContent = "高清需服务端合并，稍候…（未登录只能 480p，先扫码登录解锁）";
+          hint.textContent = "正在切换高清；未登录时 B 站可能限制到较低画质。";
         } else {
-          hint.textContent = "高清需服务端合并，稍候…";
+          hint.textContent = "正在切换高清流…";
         }
       } else {
         document.getElementById("qnHint").textContent = "";
@@ -237,16 +237,17 @@
 
   // ---------- 视频源 ----------
   function getBiliCookie() {
-    try { return localStorage.getItem("biliCookie") || ""; } catch (_) { return ""; }
+    try {
+      localStorage.removeItem("biliCookie");
+      return localStorage.getItem("biliLoggedIn") || "";
+    } catch (_) { return ""; }
   }
   function sourceSrc(s) {
     if (s.type === "file") return objectUrlFor(s.blob);
     if (s.type === "bili") {
-      const cookie = getBiliCookie();
       const qn = s.qn || 32;
-      // 480p 及以下走单文件直出（支持拖动进度）；720p/1080p 走服务端合并成单文件（手机无 MSE 也能放）
-      const api = qn >= 64 ? "/api/bili/mux" : "/api/bili/stream";
-      return `${api}?bvid=${s.bvid}&cid=${s.cid}&qn=${qn}` + (cookie ? `&cookie=${encodeURIComponent(cookie)}` : "");
+      // EdgeOne 不提供持久磁盘与 ffmpeg，所有画质都走可转发 Range 的单文件流
+      return `/api/bili/stream?bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${qn}`;
     }
     return s.url;
   }
@@ -283,22 +284,35 @@
   }
 
   // ---------- B 站登录 ----------
-  function saveBiliCookie(v) {
+  function setBiliLoginState(loggedIn) {
     try {
-      if (v) localStorage.setItem("biliCookie", v);
-      else localStorage.removeItem("biliCookie");
+      if (loggedIn) localStorage.setItem("biliLoggedIn", "1");
+      else localStorage.removeItem("biliLoggedIn");
     } catch (_) {}
     App.util.closeSheet();
-    toast(v ? "已登录 B 站（可访问更多视频）" : "已清除登录信息");
+    toast(loggedIn ? "已登录 B 站（可访问更多视频）" : "已清除登录信息");
     const st = document.getElementById("biliLoginStatus");
-    if (st) st.textContent = v ? "已登录 ✅ 可解锁高清画质" : "未登录（最高 480p）";
+    if (st) st.textContent = loggedIn ? "已登录 ✅ 可解锁高清画质" : "未登录（最高 480p）";
+  }
+
+  async function saveBiliCookie(v) {
+    try {
+      const response = await fetch("/api/bili/session", {
+        method: v ? "POST" : "DELETE",
+        headers: v ? { "Content-Type": "application/json" } : undefined,
+        body: v ? JSON.stringify({ cookie: v }) : undefined,
+      });
+      if (!response.ok) throw new Error("保存登录信息失败");
+      setBiliLoginState(Boolean(v));
+    } catch (e) {
+      toast("登录信息保存失败：" + e.message);
+    }
   }
 
   function openBiliLogin() {
-    const cur = getBiliCookie();
     const ta = el("textarea", {
       placeholder: "在此粘贴 SESSDATA（或整段 Cookie）",
-      value: cur,
+      value: "",
     });
     const help = el("div", { class: "bili-help", hidden: true }, [
       el("p", { class: "bili-help-t", text: "电脑浏览器获取（最方便）：" }),
@@ -306,7 +320,7 @@
       el("p", { text: "2. 按 F12 → Application（应用）→ Cookies → bilibili.com" }),
       el("p", { text: "3. 找到 SESSDATA，双击复制它的值" }),
       el("p", { text: "4. 回到这里点「📋 粘贴」，再点「保存」即可" }),
-      el("p", { class: "hint", text: "手机上也能拿：给 bilibili.com 存个书签，网址改成 javascript:alert(document.cookie)，登录后点书签复制 SESSDATA。Cookie 只存在本机浏览器，仅用于向 B 站请求高清地址。" }),
+      el("p", { class: "hint", text: "手机上也能拿：给 bilibili.com 存个书签，网址改成 javascript:alert(document.cookie)，登录后点书签复制 SESSDATA。登录信息会保存为本站专用的 HttpOnly Cookie，仅用于向 B 站请求高清地址。" }),
     ]);
     const pasteBtn = el("button", {
       class: "btn soft sm", text: "📋 粘贴", onclick: async () => {
@@ -328,7 +342,7 @@
     });
     const qrBtn = el("button", { class: "btn sm", text: "📱 扫码登录", onclick: () => openBiliQR() });
     App.util.openSheet("B 站登录（解锁高清）", el("div", {}, [
-      el("p", { class: "hint", text: "登录后部分需权限的视频也能提取，并可解锁 720p / 1080p 高清（高清由服务器合并，首次约等几秒）。" }),
+      el("p", { class: "hint", text: "登录后部分需权限的视频也能提取，并可解锁 720p / 1080p 高清。" }),
       ta,
       el("div", { class: "controls" }, [pasteBtn, helpBtn, ok, logoutBtn]),
       help,
@@ -347,7 +361,7 @@
       return;
     }
     try {
-      const r = await fetch("/api/bili/check?cookie=" + encodeURIComponent(cookie)).then((x) => x.json());
+      const r = await fetch("/api/bili/check").then((x) => x.json());
       if (r.loggedIn) {
         if (st) st.textContent = "已登录 ✅ 可解锁高清画质";
       } else {
@@ -361,7 +375,7 @@
   }
 
   function openBiliQR() {
-    const img = el("img", { class: "qr-img", alt: "二维码" });
+    const qrContainer = el("div", { class: "qr-img", role: "img", "aria-label": "B站登录二维码" });
     const status = el("div", { class: "qr-status", text: "正在生成二维码…" });
     let timer = null, curKey = null;
     const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
@@ -372,7 +386,19 @@
         const info = await fetch("/api/bili/qr/gen").then((r) => r.json());
         if (info.error) throw new Error(info.error);
         curKey = info.key;
-        img.src = info.dataUrl;
+        if (info.dataUrl) {
+          qrContainer.replaceChildren(el("img", { alt: "B站登录二维码", src: info.dataUrl }));
+        } else if (info.url && window.QRCode) {
+          qrContainer.replaceChildren();
+          new window.QRCode(qrContainer, {
+            text: info.url,
+            width: 196,
+            height: 196,
+            correctLevel: window.QRCode.CorrectLevel.M,
+          });
+        } else {
+          throw new Error("二维码组件未加载，请稍后重试或手动粘贴 Cookie");
+        }
         timer = setInterval(poll, 1500);
       } catch (e) {
         status.textContent = "生成失败：" + e.message;
@@ -383,13 +409,13 @@
       if (document.getElementById("sheetMask").hidden) { stop(); return; }
       try {
         const r = await fetch("/api/bili/qr/poll?key=" + encodeURIComponent(curKey)).then((x) => x.json());
-        if (r.status === "confirmed") { stop(); saveBiliCookie(r.cookie); }
+        if (r.status === "confirmed") { stop(); setBiliLoginState(true); }
         else if (r.status === "expired") { stop(); status.textContent = "二维码已过期，点「重新生成」"; }
         else if (r.status === "scanned") { status.textContent = "已扫码，请在手机上点「确认登录」"; }
       } catch (e) { /* 忽略瞬时错误，继续轮询 */ }
     }
     App.util.openSheet("📱 扫码登录 B 站", el("div", { class: "qr-box" }, [
-      img, status,
+      qrContainer, status,
       el("button", { class: "btn soft sm", text: "🔄 重新生成", onclick: () => startQR() }),
     ]));
     startQR();
@@ -397,10 +423,9 @@
 
   // ---------- DASH 高清（合并音视频） ----------
   async function loadDash(s) {
-    const cookie = getBiliCookie();
     showBuffer("加载高清流…");
     try {
-      const qs = `bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${s.qn || 80}` + (cookie ? `&cookie=${encodeURIComponent(cookie)}` : "");
+      const qs = `bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${s.qn || 80}`;
       const info = await fetch("/api/bili/dash?" + qs).then((r) => r.json());
       if (info.error) throw new Error(info.error);
       if ((s.qn || 80) >= 64 && (info.height || 0) < 720) {
@@ -410,9 +435,9 @@
       }
       if (!window.MediaSource) {
         // 无 MSE：视频/音频分别用独立元素播放并同步，秒开、可拖动（免去服务端合并的等待）
-        setupDual(info, cookie);
+        setupDual(info);
       } else {
-        await setupMSE(info, cookie, s);
+        await setupMSE(info, s);
       }
     } catch (e) {
       teardownAudio();
@@ -426,9 +451,9 @@
   }
 
   // 无 MSE 时：视频放 <video>（仅画面），音频放 <audio>（仅声音），靠 video 事件同步
-  function setupDual(info, cookie) {
+  function setupDual(info) {
     teardownAudio();
-    const vurl = "/api/video?url=" + encodeURIComponent(info.video) + (cookie ? `&cookie=${encodeURIComponent(cookie)}` : "");
+    const vurl = "/api/video?url=" + encodeURIComponent(info.video);
     video.src = vurl;
     video.playbackRate = speed;
     video.classList.toggle("mirror", mirror);
@@ -436,7 +461,7 @@
 
     audioEl = new Audio();
     audioEl.preload = "auto";
-    audioEl.src = "/api/video?url=" + encodeURIComponent(info.audio) + (cookie ? `&cookie=${encodeURIComponent(cookie)}` : "");
+    audioEl.src = "/api/video?url=" + encodeURIComponent(info.audio);
     video.addEventListener("play", onVPlay);
     video.addEventListener("pause", onVPause);
     video.addEventListener("seeking", onVSeek);
@@ -504,7 +529,7 @@
     video.removeEventListener("playing", onVPlaying);
   }
 
-  function setupMSE(info, cookie, s) {
+  function setupMSE(info, s) {
     return new Promise((resolve, reject) => {
       if (!window.MediaSource) { reject(new Error("当前浏览器不支持高清播放")); return; }
       const ms = new MediaSource();
@@ -517,7 +542,7 @@
           const streams = [[make('video/mp4; codecs="' + info.vcodec + '"'), info.video]];
           if (info.audio) streams.push([make('audio/mp4; codecs="' + info.acodec + '"'), info.audio]);
           for (const [sb, url] of streams) {
-            const purl = "/api/video?url=" + encodeURIComponent(url) + (cookie ? `&cookie=${encodeURIComponent(cookie)}` : "");
+            const purl = "/api/video?url=" + encodeURIComponent(url);
             const buf = await fetch(purl).then((r) => {
               if (!r.ok) throw new Error("媒体下载失败 " + r.status);
               return r.arrayBuffer();
