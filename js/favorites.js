@@ -218,7 +218,17 @@
       f.videoIds = (f.videoIds || []).filter((x) => x !== v.id);
       await App.store.addFav(f);
     }
-    openFav(currentFavId);
+    const favs = await App.store.listFavs();
+    const isStillReferenced = favs.some((fav) => (fav.videoIds || []).includes(v.id));
+    if (!isStillReferenced && v.type === "file") {
+      const shouldDelete = await confirmSheet(
+        "释放本地空间",
+        `「${v.name || "该视频"}」已不在任何收藏夹中。是否同时删除浏览器里的本地视频副本？`,
+        "删除本地副本"
+      );
+      if (shouldDelete) await App.store.del("videos", v.id);
+    }
+    await render();
   }
 
   App.favorites = { init, render, openFav };

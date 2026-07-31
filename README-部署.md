@@ -13,17 +13,9 @@
 
 需要：
 
-- **Python 3.8+**（macOS/Linux 一般自带；Windows 去 python.org 下载安装，记得勾选 “Add to PATH”）
-- **一个 Python 包**（扫码登录 B 站用到）：
-  ```bash
-  pip3 install -r requirements.txt
-  # 或单独： pip3 install qrcode
-  ```
-- **ffmpeg（可选）**：只有在你想用「1080p 合并」那条路径时才需要。
-  默认的 480p 单文件播放**不需要 ffmpeg**。
-  - macOS：`brew install ffmpeg`
-  - Ubuntu：`sudo apt install ffmpeg`
-  - Windows：去 gyan.dev/ffmpeg 下载，解压并把 `bin` 目录加进 PATH
+- **Python 3.8+**（macOS/Linux 一般自带；Windows 去 python.org 下载安装，记得勾选 “Add to PATH”）。
+
+当前网页的扫码二维码、视频导出和高清播放不依赖 Python 第三方包或服务器端 ffmpeg；直接运行 `serve.py` 即可。`requirements.txt` 保留为空依赖说明，方便一键平台识别 Python 项目。
 
 ---
 
@@ -60,7 +52,6 @@
 sudo mkdir -p /opt/dance-wb
 # 用 scp / git 把项目文件拷到 /opt/dance-wb
 cd /opt/dance-wb
-pip3 install -r requirements.txt
 python3 serve.py 8000   # 先手动跑一次，确认能启动
 ```
 
@@ -145,7 +136,7 @@ cloudflared tunnel --url http://localhost:8000
 ├── style.css           样式
 ├── js/                 各模块（player / favorites / calendar / split / store / app）
 ├── serve.py            后端（静态服务 + B 站代理 + 扫码登录）
-├── requirements.txt    后端依赖（qrcode）
+├── requirements.txt    依赖说明（当前无需安装第三方包）
 ├── runtime.txt         Python 版本锁定（一键平台用）
 ├── Procfile            启动命令（Render / Railway 识别）
 ├── start.sh            一键启动脚本（本地用）

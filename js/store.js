@@ -80,7 +80,12 @@
   const settings = {
     get(k, d) {
       const v = localStorage.getItem("dw_" + k);
-      return v == null ? d : JSON.parse(v);
+      if (v == null) return d;
+      try {
+        return JSON.parse(v);
+      } catch (_) {
+        return d;
+      }
     },
     set(k, v) {
       localStorage.setItem("dw_" + k, JSON.stringify(v));

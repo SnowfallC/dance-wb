@@ -6,6 +6,25 @@
   let people = [];
   let expenses = [];
 
+  async function restoreBills() {
+    try {
+      const saved = await App.store.get("bills", "current");
+      if (saved && Array.isArray(saved.people) && Array.isArray(saved.expenses)) {
+        people = saved.people;
+        expenses = saved.expenses;
+      }
+    } catch (_) {
+      toast("分账记录读取失败，已使用空白账单");
+    }
+    render();
+  }
+
+  function persistBills() {
+    App.store.put("bills", { id: "current", people, expenses, updatedAt: Date.now() }).catch(() => {
+      toast("分账记录保存失败");
+    });
+  }
+
   function init() {
     // 金额框只允许数字与一个小数点，去掉 e / + / - 等符号，避免「什么都能输入」
     const amtInput = document.getElementById("expAmount");
@@ -22,6 +41,7 @@
         if (!people.includes(n)) people.push(n);
       });
       document.getElementById("peopleInput").value = "";
+      persistBills();
       render();
     };
     document.getElementById("addExpBtn").onclick = () => {
@@ -31,9 +51,11 @@
       expenses.push({ id: uid(), amount: amt, content: content || "未注明" });
       document.getElementById("expAmount").value = "";
       document.getElementById("expContent").value = "";
+      persistBills();
       render();
     };
     render();
+    restoreBills();
   }
 
   function render() {
@@ -44,7 +66,7 @@
     people.forEach((p, i) => {
       pl.appendChild(el("span", { class: "pchip" }, [
         p,
-        el("b", { text: "×", onclick: () => { people.splice(i, 1); render(); } }),
+        el("b", { text: "×", onclick: () => { people.splice(i, 1); persistBills(); render(); } }),
       ]));
     });
 
@@ -58,7 +80,7 @@
         el("span", { text: x.content }),
         el("span", {}, [
           el("span", { class: "ei-amt", text: "¥" + x.amount.toFixed(2) }),
-          el("b", { class: "ei-del", text: "×", onclick: () => { expenses.splice(i, 1); render(); } }),
+          el("b", { class: "ei-del", text: "×", onclick: () => { expenses.splice(i, 1); persistBills(); render(); } }),
         ]),
       ]));
     });

@@ -181,15 +181,27 @@ function normalizeQuality(value) {
 async function resolveBvid(raw) {
   const value = (raw || "").trim();
   if (!value) return null;
-  if (/b23\.tv\//i.test(value)) {
+  const shortUrl = parseBiliShortUrl(value);
+  if (shortUrl) {
     try {
-      const response = await fetch(value, { headers: { "User-Agent": userAgent }, redirect: "follow" });
+      const response = await fetch(shortUrl, { headers: { "User-Agent": userAgent }, redirect: "follow" });
       return extractBvid(response.url) || extractAid(response.url);
     } catch (_) {
       return null;
     }
   }
   return extractBvid(value) || extractAid(value);
+}
+
+function parseBiliShortUrl(value) {
+  const normalized = /^(?:www\.)?b23\.tv(?:\/|$)/i.test(value) ? "https://" + value : value;
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "https:" || !["b23.tv", "www.b23.tv"].includes(url.hostname.toLowerCase())) return null;
+    return url.href;
+  } catch (_) {
+    return null;
+  }
 }
 
 function extractBvid(value) {

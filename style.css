@@ -309,7 +309,13 @@ video.mirror{transform:scaleX(-1);}
 .export-progress{display:flex;align-items:center;gap:10px;margin-top:10px;}
 .export-progress .bar{flex:1;height:10px;background:var(--bg-2);border-radius:var(--r-pill);overflow:hidden;box-shadow:none;}
 .export-progress .fill{height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--pink-strong));border-radius:var(--r-pill);transition:width .2s;}
+.export-progress .fill.is-indeterminate{animation:export-loading 1s ease-in-out infinite;}
 .export-progress span{font-size:12px;color:var(--muted);}
+
+@keyframes export-loading{
+  0%{transform:translateX(-100%);}
+  100%{transform:translateX(300%);}
+}
 
 /* 笔记时间轴 —— 保持 120px 高度契约 */
 .notes-track{position:relative;height:120px;background:radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0/16px 16px;background-color:var(--surface-2);border-radius:var(--r-lg);overflow:hidden;border:none;}

@@ -5,7 +5,7 @@ serve.py —— 舞刀（Dance Workbench）应用服务器
 - B 站提取代理 API（浏览器跨域无法直接调 B 站接口，由本服务代取并流式回传）
   - GET /api/bili/meta?url=<BV/av/b23.tv 链接>   返回 {title,bvid,cid,duration,author,cover}
   - GET /api/bili/stream?bvid=&cid=&qn=          流式代理视频（支持 Range 转发，可拖动进度）
-  - GET /api/video?url=<直链>                     通用直链媒体代理（仅允许 https）
+  - GET /api/video?url=<B站媒体直链>               B 站媒体流代理（支持 Range）
 
 仅使用 Python 标准库（urllib），无第三方依赖。
 """
@@ -45,6 +45,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 BILI_REFERER = "https://www.bilibili.com"
 API_HOST = "https://api.bilibili.com"
+MEDIA_HOST_SUFFIXES = (".bilivideo.com", ".bilivideo.cn", ".acgvideo.com")
 
 # 线程安全的 WBI mixin key 缓存
 _wbi_lock = threading.Lock()
@@ -110,16 +111,14 @@ def resolve_bvid(raw):
     raw = (raw or "").strip()
     if not raw:
         return None
-    # 短链 b23.tv / b23.tv/xxxx
-    m = re.search(r"b23\.tv/([A-Za-z0-9]+)", raw)
-    if m:
-        # 跟随重定向拿到真实链接
-        req = urllib.request.Request(raw, headers={"User-Agent": UA})
+    short_url = parse_bili_short_url(raw)
+    if short_url:
+        req = urllib.request.Request(short_url, headers={"User-Agent": UA})
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 raw = r.geturl()
         except Exception:
-            pass
+            return None
     if "BV" in raw:
         m = re.search(r"(BV[0-9A-Za-z]+)", raw)
         if m:
@@ -128,6 +127,37 @@ def resolve_bvid(raw):
     if m:
         return "av" + m.group(1)
     return None
+
+
+def parse_bili_short_url(raw):
+    """仅允许可信的 b23.tv 短链，避免服务端请求任意网址。"""
+    candidate = "https://" + raw if re.match(r"^(?:www\.)?b23\.tv(?:/|$)", raw, re.I) else raw
+    try:
+        parsed = urllib.parse.urlparse(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or parsed.hostname not in {"b23.tv", "www.b23.tv"}:
+        return None
+    return candidate
+
+
+def is_allowed_media_url(raw):
+    """只代理 B 站媒体域名，避免公开部署后成为通用代理。"""
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and any(host.endswith(suffix) for suffix in MEDIA_HOST_SUFFIXES)
+
+
+def parse_quality(qs, default):
+    """读取并限制清晰度参数，避免非法输入中断请求处理。"""
+    try:
+        quality = int((qs.get("qn") or [str(default)])[0])
+    except (TypeError, ValueError):
+        return default
+    return quality if 0 < quality <= 127 else default
 
 
 def bili_meta(bvid):
@@ -363,21 +393,21 @@ class Handler(SimpleHTTPRequestHandler):
     def _api_bili_stream(self, qs):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
-        qn = int((qs.get("qn") or ["32"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        qn = parse_quality(qs, 32)
+        cookie = self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
             play_url = bili_playurl(bvid, cid, qn, cookie)
         except Exception as e:
             return self._send_json({"error": f"获取播放地址失败：{e}"}, 502)
-        return self._proxy_url(play_url)
+        return self._proxy_url(play_url, cookie=cookie)
 
     def _api_bili_dash(self, qs):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
-        qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        qn = parse_quality(qs, 80)
+        cookie = self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
@@ -441,8 +471,8 @@ class Handler(SimpleHTTPRequestHandler):
         """
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
-        qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        qn = parse_quality(qs, 80)
+        cookie = self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         try:
@@ -483,8 +513,8 @@ class Handler(SimpleHTTPRequestHandler):
         """主动把某视频某清晰度合并并缓存（不播放，供「缓存好了再看」）。"""
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
-        qn = int((qs.get("qn") or ["80"])[0])
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        qn = parse_quality(qs, 80)
+        cookie = self._session_cookie() or None
         if not bvid or not cid:
             return self._send_json({"error": "缺少 bvid/cid"}, 400)
         cache_path = self._bili_cache_path(bvid, cid, qn, cookie)
@@ -525,10 +555,10 @@ class Handler(SimpleHTTPRequestHandler):
         bvid = (qs.get("bvid") or [""])[0]
         cid = (qs.get("cid") or [""])[0]
         qn = (qs.get("qn") or [""])[0]
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        cookie = self._session_cookie() or None
         try:
             if bvid and cid and qn:
-                p = self._bili_cache_path(bvid, cid, int(qn), cookie)
+                p = self._bili_cache_path(bvid, cid, parse_quality(qs, 80), cookie)
                 freed = os.path.getsize(p) if os.path.exists(p) else 0
                 try:
                     os.remove(p)
@@ -600,9 +630,9 @@ class Handler(SimpleHTTPRequestHandler):
         target = (qs.get("url") or [""])[0]
         if not target:
             return self._send_json({"error": "缺少 url"}, 400)
-        if not target.startswith("https://"):
-            return self._send_json({"error": "仅支持 https 直链"}, 400)
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        if not is_allowed_media_url(target):
+            return self._send_json({"error": "仅允许代理 B 站媒体地址"}, 400)
+        cookie = self._session_cookie() or None
         return self._proxy_url(target, cookie=cookie)
 
     def do_POST(self):
@@ -644,7 +674,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json({"error": f"轮询失败：{e}"}, 502)
 
     def _api_bili_check(self, qs):
-        cookie = (qs.get("cookie") or [""])[0] or self._session_cookie() or None
+        cookie = self._session_cookie() or None
         if not cookie:
             return self._send_json({"loggedIn": False, "reason": "no_cookie"})
         try:
@@ -655,6 +685,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _proxy_url(self, target, cookie=None):
         """流式代理媒体，支持 Range 转发（可拖动进度）。"""
+        if not is_allowed_media_url(target):
+            return self._send_json({"error": "仅允许代理 B 站媒体地址"}, 400)
         hdr = {
             "User-Agent": UA,
             "Referer": BILI_REFERER,

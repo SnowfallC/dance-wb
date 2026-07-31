@@ -4,10 +4,7 @@
   const { el, uid, fmt, apiUrl, toast, openSheet, confirmSheet } = App.util;
 
   let video, curSource = null, objectUrl = null;
-  let audioEl = null; // 无 MSE 时：音频单独播放，与 video 同步
-  let audioSyncRAF = null;      // 双元素同步用的 rAF 循环
   let audioCtx = null;          // Web Audio 上下文（用于导出混音）
-  let audioSrcNode = null;      // audioEl 的 MediaElementSource（每个元素仅可创建一次）
   let audioDest = null;         // 导出用的 MediaStreamDestination
   let videoSrcNode = null;      // video 元素的 MediaElementSource（MSE/普通源导出混音用）
   let aTime = null, bTime = null;
@@ -20,6 +17,10 @@
   let wasmRuntime = null;
   let wasmLoadingRuntime = null;
   let wasmExportActive = false;
+  const wasmCoreBytes = 32232419;
+  const maxWasmInputBytes = 120 * 1024 * 1024;
+  const maxBeatAnalysisBytes = 24 * 1024 * 1024;
+  const maxBeatAnalysisSeconds = 180;
 
   function init() {
     video = document.getElementById("mainVideo");
@@ -262,7 +263,6 @@
   }
 
   function loadSource(s) {
-    teardownAudio();
     hideBuffer();
     curSource = s;
     clearDanmaku();
@@ -423,154 +423,6 @@
       el("button", { class: "btn soft sm", text: "🔄 重新生成", onclick: () => startQR() }),
     ]));
     startQR();
-  }
-
-  // ---------- DASH 高清（合并音视频） ----------
-  async function loadDash(s) {
-    showBuffer("加载高清流…");
-    try {
-      const qs = `bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${s.qn || 80}`;
-      const info = await fetch(apiUrl("/api/bili/dash?" + qs)).then((r) => r.json());
-      if (info.error) throw new Error(info.error);
-      if ((s.qn || 80) >= 64 && (info.height || 0) < 720) {
-        toast("当前未登录或该视频无更高画质，已回退到可用画质；登录后可解锁 1080p/4K");
-      } else if (info.height) {
-        toast("画质：" + info.width + "×" + info.height);
-      }
-      if (!window.MediaSource) {
-        // 无 MSE：视频/音频分别用独立元素播放并同步，秒开、可拖动（免去服务端合并的等待）
-        setupDual(info);
-      } else {
-        await setupMSE(info, s);
-      }
-    } catch (e) {
-      teardownAudio();
-      toast("高清加载失败，回退 480p：" + e.message);
-      const fb = { type: "bili", bvid: s.bvid, cid: s.cid, name: s.name, key: s.key, qn: 32 };
-      video.src = sourceSrc(fb);
-      video.playbackRate = speed;
-      video.classList.toggle("mirror", mirror);
-      video.load();
-    }
-  }
-
-  // 无 MSE 时：视频放 <video>（仅画面），音频放 <audio>（仅声音），靠 video 事件同步
-  function setupDual(info) {
-    teardownAudio();
-    const vurl = apiUrl("/api/video?url=" + encodeURIComponent(info.video));
-    video.src = vurl;
-    video.playbackRate = speed;
-    video.classList.toggle("mirror", mirror);
-    video.load();
-
-    audioEl = new Audio();
-    audioEl.preload = "auto";
-    audioEl.src = apiUrl("/api/video?url=" + encodeURIComponent(info.audio));
-    video.addEventListener("play", onVPlay);
-    video.addEventListener("pause", onVPause);
-    video.addEventListener("seeking", onVSeek);
-    video.addEventListener("ratechange", onVRate);
-    video.addEventListener("ended", onVEnded);
-    video.addEventListener("waiting", onVWaiting);   // 视频缓冲：同步暂停音频，避免咔咔抖晃
-    video.addEventListener("playing", onVPlaying);   // 视频恢复：对齐音频并续播
-    startAudioSync();
-    toast("已用「视频+音频分轨」播放，无需等待合并");
-  }
-  function onVPlay() {
-    if (audioEl) {
-      // 起播即把音频对齐到视频当前位置，消除起播延迟
-      try { if (isFinite(audioEl.duration)) audioEl.currentTime = video.currentTime; } catch (e) {}
-      audioEl.play().catch(() => {});
-    }
-  }
-  function onVPause() { if (audioEl) audioEl.pause(); }
-  function onVSeek() { if (audioEl && isFinite(audioEl.duration)) try { audioEl.currentTime = video.currentTime; } catch (e) {} }
-  function onVRate() { if (audioEl) audioEl.playbackRate = video.playbackRate; }
-  function onVEnded() { if (audioEl) audioEl.pause(); }
-  function onVWaiting() { if (audioEl) try { audioEl.pause(); } catch (e) {} }
-  function onVPlaying() {
-    if (audioEl) {
-      // 视频恢复播放：把音频拉回视频当前位置再续播，漂移归零、无爆音
-      try { if (isFinite(audioEl.duration)) audioEl.currentTime = video.currentTime; } catch (e) {}
-      audioEl.play().catch(() => {});
-    }
-  }
-
-  // rAF 同步循环：仅做 ±1% 的 playbackRate 微调度（无爆音、无跳转），
-  // 把稳态微小漂移收在 ~30ms 内；大幅漂移由 waiting/playing 事件对齐处理
-  function startAudioSync() {
-    stopAudioSync();
-    const loop = () => {
-      if (!audioEl) return;
-      audioSyncRAF = requestAnimationFrame(loop);
-      if (video.paused || audioEl.paused || !isFinite(audioEl.duration) || !audioEl.duration) return;
-      const drift = audioEl.currentTime - video.currentTime; // >0 音频偏前
-      const absd = Math.abs(drift);
-      if (absd > 0.015) {
-        audioEl.playbackRate = video.playbackRate * (drift < 0 ? 1.01 : 0.99); // 微收拢
-      } else {
-        audioEl.playbackRate = video.playbackRate;
-      }
-    };
-    audioSyncRAF = requestAnimationFrame(loop);
-  }
-  function stopAudioSync() {
-    if (audioSyncRAF) cancelAnimationFrame(audioSyncRAF);
-    audioSyncRAF = null;
-    if (audioEl) audioEl.playbackRate = video.playbackRate;
-  }
-
-  function teardownAudio() {
-    stopAudioSync();
-    if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl.src = ""; audioEl = null; }
-    audioSrcNode = null; // 元素已销毁，下次需重建图
-    video.removeEventListener("play", onVPlay);
-    video.removeEventListener("pause", onVPause);
-    video.removeEventListener("seeking", onVSeek);
-    video.removeEventListener("ratechange", onVRate);
-    video.removeEventListener("ended", onVEnded);
-    video.removeEventListener("waiting", onVWaiting);
-    video.removeEventListener("playing", onVPlaying);
-  }
-
-  function setupMSE(info, s) {
-    return new Promise((resolve, reject) => {
-      if (!window.MediaSource) { reject(new Error("当前浏览器不支持高清播放")); return; }
-      const ms = new MediaSource();
-      video.src = URL.createObjectURL(ms);
-      video.playbackRate = speed;
-      video.classList.toggle("mirror", mirror);
-      ms.addEventListener("sourceopen", async () => {
-        try {
-          const make = (mime) => ms.addSourceBuffer(mime);
-          const streams = [[make('video/mp4; codecs="' + info.vcodec + '"'), info.video]];
-          if (info.audio) streams.push([make('audio/mp4; codecs="' + info.acodec + '"'), info.audio]);
-          for (const [sb, url] of streams) {
-            const purl = apiUrl("/api/video?url=" + encodeURIComponent(url));
-            const buf = await fetch(purl).then((r) => {
-              if (!r.ok) throw new Error("媒体下载失败 " + r.status);
-              return r.arrayBuffer();
-            });
-            await appendFull(sb, buf);
-          }
-          if (ms.readyState === "open") ms.endOfStream();
-          resolve();
-        } catch (err) {
-          reject(err);
-        }
-      });
-      ms.addEventListener("error", () => reject(new Error("媒体初始化失败")));
-    });
-  }
-
-  // 整段追加（B 站 baseUrl 为完整文件，避免分块截断 moov/moof 导致静默失败）
-  function appendFull(sb, buf) {
-    return new Promise((resolve, reject) => {
-      const onErr = () => reject(new Error("追加媒体失败（编码不被支持）"));
-      sb.addEventListener("error", onErr, { once: true });
-      sb.addEventListener("updateend", () => { sb.removeEventListener("error", onErr); resolve(); }, { once: true });
-      try { sb.appendBuffer(buf); } catch (e) { reject(e); }
-    });
   }
 
   // ---------- 弹幕 ----------
@@ -931,14 +783,23 @@
 
   async function aiDetect() {
     if (!curSource) return toast("请先选择视频");
+    if (video.duration > maxBeatAnalysisSeconds) {
+      return toast("节拍检测仅支持 " + Math.round(maxBeatAnalysisSeconds / 60) + " 分钟以内的视频，请手动设置 BPM");
+    }
     const hint = document.getElementById("aiHint");
     hint.textContent = "正在分析音频…";
     try {
       let buf;
-      if (curSource.type === "file") buf = await curSource.blob.arrayBuffer();
+      if (curSource.type === "file") {
+        if (curSource.blob.size > maxBeatAnalysisBytes) throw new Error("视频文件超过 " + formatBytes(maxBeatAnalysisBytes));
+        buf = await curSource.blob.arrayBuffer();
+      }
       else {
         const resp = await fetch(video.src);
-        buf = await resp.arrayBuffer();
+        if (!resp.ok) throw new Error("视频读取失败（" + resp.status + "）");
+        const length = Number(resp.headers.get("content-length"));
+        if (Number.isFinite(length) && length > maxBeatAnalysisBytes) throw new Error("视频文件超过 " + formatBytes(maxBeatAnalysisBytes));
+        buf = await readResponseBytes(resp, "正在读取节拍分析音频…", 0, maxBeatAnalysisBytes, false);
       }
       const ctx = ensureCtx();
       const audioBuf = await ctx.decodeAudioData(buf);
@@ -1010,22 +871,9 @@
   }
 
   // ---------- 导出 ----------
-  // 导出混音：把音频（双元素 audioEl 或 video 元素自身）接入 Web Audio，
-  // 输出到一个 MediaStreamDestination，与 canvas 画面合成后再录制——导出视频自带声音且与画面同源同步
+  // 导出混音：把视频元素的音轨接入 Web Audio，输出到 MediaStreamDestination 后与画面合成。
   function getExportAudioStream() {
-    // 双元素路径：audioEl 持有声音
-    if (audioEl) {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (!audioSrcNode) {
-        audioSrcNode = audioCtx.createMediaElementSource(audioEl);
-        audioSrcNode.connect(audioCtx.destination); // 保持外放监听
-        audioDest = audioCtx.createMediaStreamDestination();
-        audioSrcNode.connect(audioDest);
-      }
-      if (audioCtx.state === "suspended") audioCtx.resume();
-      return audioDest.stream;
-    }
-    // 普通/MSE 路径：video 元素自身带音轨（预解码检测不可靠，直接尝试建图，失败由调用方兜底静音）
+    // 视频元素自身带音轨；预解码检测不可靠，直接尝试建图，失败由调用方兜底静音。
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (!videoSrcNode) {
       videoSrcNode = audioCtx.createMediaElementSource(video);
@@ -1065,7 +913,7 @@
     openSheet("选择导出方式", el("div", {}, [
       el("p", { class: "hint", text: "⚡ 原视频快速下载：不应用镜像、AB 截取或分辨率设置，几乎无需等待。" }),
       el("p", { class: "hint", text: "🎬 实时渲染导出：应用镜像、AB 截取与分辨率设置；录制时长约等于导出片段时长。" }),
-      el("p", { class: "hint", text: "🚀 FFmpeg 加速导出：首次下载约 31 MB 的本地处理组件，短片段更快；处理不会上传视频。" }),
+      el("p", { class: "hint", text: "🚀 FFmpeg 加速导出：首次传输约 10 MB，浏览器自动解压并载入约 31 MB 的本地处理核心；处理不会上传视频。" }),
       el("div", { class: "controls" }, [fastDownload, realtimeExport, wasmExport]),
     ]));
   }
@@ -1074,7 +922,7 @@
     App.util.closeSheet();
     const ok = await confirmSheet(
       "载入 FFmpeg 加速组件",
-      "首次使用将从本站下载约 31 MB 的组件，并仅在当前浏览器处理视频。长视频或低内存手机可能较慢，建议优先导出短 AB 片段。",
+      "首次会传输约 10 MB 的组件，浏览器自动解压后载入约 31 MB 核心，并仅在当前浏览器处理视频。下载和读入视频时会显示实时进度。长视频或低内存手机可能较慢，建议优先导出短 AB 片段。",
       "下载并开始"
     );
     if (ok) startWasmExport();
@@ -1120,6 +968,9 @@
     document.getElementById("exportStop").hidden = false;
     document.getElementById("exportProgress").hidden = false;
     document.getElementById("exportPct").textContent = message;
+    const fill = document.getElementById("exportFill");
+    fill.classList.remove("is-indeterminate");
+    fill.style.width = "0%";
     document.getElementById("exportDl").hidden = true;
   }
 
@@ -1127,6 +978,86 @@
     document.getElementById("exportBtn").disabled = false;
     document.getElementById("exportStop").hidden = true;
     document.getElementById("exportProgress").hidden = true;
+  }
+
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / Math.pow(1024, index);
+    return (value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)) + " " + units[index];
+  }
+
+  function setExportProgress(message, loaded, total) {
+    const fill = document.getElementById("exportFill");
+    const label = document.getElementById("exportPct");
+    const hasTotal = Number.isFinite(total) && total > 0;
+    if (hasTotal) {
+      const ratio = Math.max(0, Math.min(1, loaded / total));
+      fill.classList.remove("is-indeterminate");
+      fill.style.width = (ratio * 100).toFixed(1) + "%";
+      label.textContent = message + " " + formatBytes(loaded) + " / " + formatBytes(total) + "（" + Math.round(ratio * 100) + "%）";
+      return;
+    }
+    fill.style.width = "35%";
+    fill.classList.add("is-indeterminate");
+    label.textContent = message + " 已读取 " + formatBytes(loaded) + "（文件总大小未知）";
+  }
+
+  function setExportRatio(message, ratio) {
+    const fill = document.getElementById("exportFill");
+    const percent = Math.max(0, Math.min(1, ratio));
+    fill.classList.remove("is-indeterminate");
+    fill.style.width = (percent * 100).toFixed(1) + "%";
+    document.getElementById("exportPct").textContent = message + " " + Math.round(percent * 100) + "%";
+  }
+
+  async function readStreamBytes(stream, message, total, maxBytes, cancelWithExport) {
+    const reader = stream.getReader();
+    let capacity = Number.isSafeInteger(total) && total > 0 ? total : 1024 * 1024;
+    if (maxBytes) capacity = Math.min(capacity, maxBytes);
+    let data = new Uint8Array(capacity);
+    let loaded = 0;
+    while (true) {
+      if (cancelWithExport && !wasmExportActive) {
+        await reader.cancel();
+        throw new Error("导出已取消");
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const nextLoaded = loaded + value.byteLength;
+      if (maxBytes && nextLoaded > maxBytes) {
+        await reader.cancel();
+        throw new Error("视频超过 " + formatBytes(maxBytes) + "，为避免手机内存不足已停止读取");
+      }
+      if (nextLoaded > data.byteLength) {
+        const nextCapacity = Math.max(nextLoaded, Math.min(maxBytes || Number.MAX_SAFE_INTEGER, data.byteLength * 2));
+        const expanded = new Uint8Array(nextCapacity);
+        expanded.set(data.subarray(0, loaded));
+        data = expanded;
+      }
+      data.set(value, loaded);
+      loaded = nextLoaded;
+      setExportProgress(message, loaded, total);
+    }
+    setExportProgress(message, loaded, total || loaded);
+    return loaded === data.byteLength ? data : data.slice(0, loaded);
+  }
+
+  async function readResponseBytes(response, message, fallbackTotal, maxBytes, cancelWithExport) {
+    const contentLength = Number(response.headers.get("content-length"));
+    const total = Number.isFinite(fallbackTotal) && fallbackTotal > 0
+      ? fallbackTotal
+      : (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : 0);
+    if (maxBytes && total > maxBytes) throw new Error("视频超过 " + formatBytes(maxBytes) + "，为避免手机内存不足已停止读取");
+    if (!response.body) {
+      const data = new Uint8Array(await response.arrayBuffer());
+      if (maxBytes && data.byteLength > maxBytes) throw new Error("视频超过 " + formatBytes(maxBytes) + "，为避免手机内存不足已停止读取");
+      setExportProgress(message, data.byteLength, total || data.byteLength);
+      return data;
+    }
+    return readStreamBytes(response.body, message, total, maxBytes, cancelWithExport);
   }
 
   function loadScript(src) {
@@ -1156,12 +1087,22 @@
     wasmLoadingRuntime = runtime;
     runtime.on("progress", ({ progress }) => {
       if (!wasmExportActive || !Number.isFinite(progress)) return;
-      document.getElementById("exportPct").textContent = "正在快速导出… " + Math.round(progress * 100) + "%";
+      setExportRatio("正在快速导出…", progress);
     });
-    await runtime.load({
-      coreURL: new URL("core/ffmpeg-core.js", baseUrl).href,
-      wasmURL: new URL("core/ffmpeg-core.wasm.gz", baseUrl).href,
-    });
+    const wasmResponse = await fetch(new URL("core/ffmpeg-core.wasm.gz", baseUrl).href);
+    if (!wasmResponse.ok) throw new Error("FFmpeg 核心下载失败（" + wasmResponse.status + "）");
+    const wasmData = await readResponseBytes(wasmResponse, "正在下载并解压 FFmpeg 核心…", wasmCoreBytes, 0, true);
+    if (!wasmExportActive) return runtime;
+    setExportProgress("正在载入 FFmpeg 核心到内存…", wasmCoreBytes, wasmCoreBytes);
+    const wasmUrl = URL.createObjectURL(new Blob([wasmData], { type: "application/wasm" }));
+    try {
+      await runtime.load({
+        coreURL: new URL("core/ffmpeg-core.js", baseUrl).href,
+        wasmURL: wasmUrl,
+      });
+    } finally {
+      URL.revokeObjectURL(wasmUrl);
+    }
     wasmRuntime = runtime;
     wasmLoadingRuntime = null;
     return runtime;
@@ -1170,16 +1111,21 @@
   async function getWasmInput() {
     const name = "input.mp4";
     if (curSource && curSource.type === "file") {
-      return { name, data: new Uint8Array(await curSource.blob.arrayBuffer()) };
+      const message = "正在读取本地视频到浏览器内存…";
+      if (curSource.blob.size > maxWasmInputBytes) {
+        throw new Error("视频超过 " + formatBytes(maxWasmInputBytes) + "，请改用实时渲染或原视频下载");
+      }
+      const data = typeof curSource.blob.stream === "function"
+        ? await readStreamBytes(curSource.blob.stream(), message, curSource.blob.size, maxWasmInputBytes, true)
+        : new Uint8Array(await curSource.blob.arrayBuffer());
+      setExportProgress(message, data.byteLength, curSource.blob.size);
+      return { name, data };
     }
     const sourceUrl = curSource && curSource.type === "bili" ? sourceSrc(curSource) : curSource && curSource.url;
     if (!sourceUrl) throw new Error("当前视频无法交给 FFmpeg 处理");
     const response = await fetch(sourceUrl);
     if (!response.ok) throw new Error("视频读取失败（" + response.status + "）");
-    const data = new Uint8Array(await response.arrayBuffer());
-    if (data.byteLength > 250 * 1024 * 1024) {
-      throw new Error("视频超过 250 MB，手机浏览器内存风险较高，请改用实时渲染或原视频下载");
-    }
+    const data = await readResponseBytes(response, "正在读取视频到浏览器内存…", 0, maxWasmInputBytes, true);
     return { name, data };
   }
 
@@ -1193,7 +1139,6 @@
     try {
       runtime = await getWasmRuntime();
       if (!wasmExportActive) return;
-      document.getElementById("exportPct").textContent = "正在读取视频到浏览器内存…";
       const input = await getWasmInput();
       if (!wasmExportActive) return;
       inputName = input.name;
@@ -1217,7 +1162,7 @@
         args.push("-c", "copy");
       }
       args.push("-movflags", "+faststart", outputName);
-      document.getElementById("exportPct").textContent = "FFmpeg 正在处理视频…";
+      setExportRatio("FFmpeg 正在处理视频…", 0);
       await runtime.exec(args);
       if (!wasmExportActive) return;
       const output = await runtime.readFile(outputName);
@@ -1338,5 +1283,5 @@
     if (exportState && exportState.state === "recording") exportState.stop();
   }
 
-  App.player = { init, loadSource, videoRecordToSource, get source() { return curSource; }, _audio() { return audioEl; } };
+  App.player = { init, loadSource, videoRecordToSource, get source() { return curSource; } };
 })();
