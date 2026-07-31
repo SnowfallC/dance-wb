@@ -1,4 +1,13 @@
 {
   "mainlandRegions": ["ap-guangzhou"],
-  "overseasRegions": ["ap-hongkong"]
+  "overseasRegions": ["ap-hongkong"],
+  "headers": [
+    {
+      "source": "/js/vendor/ffmpeg/core/ffmpeg-core.wasm.gz",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Content-Encoding", "value": "gzip" }
+      ]
+    }
+  ]
 }

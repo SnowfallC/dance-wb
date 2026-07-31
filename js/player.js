@@ -1160,7 +1160,7 @@
     });
     await runtime.load({
       coreURL: new URL("core/ffmpeg-core.js", baseUrl).href,
-      wasmURL: new URL("core/ffmpeg-core.wasm", baseUrl).href,
+      wasmURL: new URL("core/ffmpeg-core.wasm.gz", baseUrl).href,
     });
     wasmRuntime = runtime;
     wasmLoadingRuntime = null;

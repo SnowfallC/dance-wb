@@ -7,7 +7,7 @@
 - 本地文件练习、笔记、AB 循环、节拍器、日历、分账与 IndexedDB 数据保存。
 - B 站链接解析、单文件播放、DASH 信息获取、扫码登录与登录状态校验。
 - B 站媒体的 Range 流式转发，支持视频拖动进度。
-- FFmpeg 加速导出由 EdgeOne 静态托管 WASM 核心，用户确认后才在浏览器本地载入；不需要云端转码服务。
+- FFmpeg 加速导出由 EdgeOne 静态托管 WASM 核心，用户确认后才在浏览器本地载入；核心以 gzip 文件传输并由浏览器自动解压，不需要云端转码服务。
 
 登录后的 B 站 Cookie 只写入本站 `/api` 路径下的 `HttpOnly`、`Secure` Cookie，不再写入 LocalStorage 或拼接到视频 URL 中。二维码生成库已随仓库放入 `js/vendor/`，部署和扫码不依赖 Python、Pillow 或外部二维码 CDN。不要把包含 Cookie 的浏览器数据导出或分享给他人。
 

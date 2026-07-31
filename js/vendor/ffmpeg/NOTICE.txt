@@ -4,8 +4,10 @@ FFmpeg WASM 第三方组件说明
 
 - @ffmpeg/ffmpeg 0.12.15（MIT）：ffmpeg.js、814.ffmpeg.js
   源码：https://github.com/ffmpegwasm/ffmpeg.wasm
-- @ffmpeg/core 0.12.10 单线程核心（GPL-2.0-or-later）：core/ffmpeg-core.js、core/ffmpeg-core.wasm
+- @ffmpeg/core 0.12.10 单线程核心（GPL-2.0-or-later）：core/ffmpeg-core.js、core/ffmpeg-core.wasm.gz
   源码：https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10
   许可证：https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+核心文件以 gzip 形式静态托管，EdgeOne 通过 Content-Encoding: gzip 响应；浏览器会自动解压后交给 FFmpeg，不需要网页手动解压。
 
 这些组件仅在用户主动选择“FFmpeg 加速导出”后由浏览器载入，视频处理在用户设备完成。
