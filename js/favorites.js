@@ -1,7 +1,7 @@
 /* favorites.js —— 收藏夹 + B 站提取 */
 (function () {
   const App = (window.App = window.App || {});
-  const { el, uid, toast, openSheet, confirmSheet } = App.util;
+  const { el, uid, apiUrl, toast, openSheet, confirmSheet } = App.util;
 
   let currentFavId = null;
 
@@ -167,7 +167,7 @@
         if (!url) return toast("请粘贴链接");
         toast("正在解析 B 站视频…");
         try {
-          const meta = await fetch("/api/bili/meta?url=" + encodeURIComponent(url)).then((r) => r.json());
+          const meta = await fetch(apiUrl("/api/bili/meta?url=" + encodeURIComponent(url))).then((r) => r.json());
           if (meta.error) throw new Error(meta.error);
           const rec = {
             id: uid(),

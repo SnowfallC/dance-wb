@@ -1,7 +1,7 @@
 /* player.js —— 播放器：源/倍速/镜面/AB循环/节拍器/AI节拍/笔记/导出 */
 (function () {
   const App = (window.App = window.App || {});
-  const { el, uid, fmt, toast, openSheet } = App.util;
+  const { el, uid, fmt, apiUrl, toast, openSheet } = App.util;
 
   let video, curSource = null, objectUrl = null;
   let audioEl = null; // 无 MSE 时：音频单独播放，与 video 同步
@@ -247,7 +247,7 @@
     if (s.type === "bili") {
       const qn = s.qn || 32;
       // EdgeOne 不提供持久磁盘与 ffmpeg，所有画质都走可转发 Range 的单文件流
-      return `/api/bili/stream?bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${qn}`;
+      return apiUrl(`/api/bili/stream?bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${qn}`);
     }
     return s.url;
   }
@@ -297,7 +297,7 @@
 
   async function saveBiliCookie(v) {
     try {
-      const response = await fetch("/api/bili/session", {
+      const response = await fetch(apiUrl("/api/bili/session"), {
         method: v ? "POST" : "DELETE",
         headers: v ? { "Content-Type": "application/json" } : undefined,
         body: v ? JSON.stringify({ cookie: v }) : undefined,
@@ -361,7 +361,7 @@
       return;
     }
     try {
-      const r = await fetch("/api/bili/check").then((x) => x.json());
+      const r = await fetch(apiUrl("/api/bili/check")).then((x) => x.json());
       if (r.loggedIn) {
         if (st) st.textContent = "已登录 ✅ 可解锁高清画质";
       } else {
@@ -383,7 +383,7 @@
       stop();
       status.textContent = "请用手机 B 站 App 扫码，并在手机上点「确认登录」";
       try {
-        const info = await fetch("/api/bili/qr/gen").then((r) => r.json());
+        const info = await fetch(apiUrl("/api/bili/qr/gen")).then((r) => r.json());
         if (info.error) throw new Error(info.error);
         curKey = info.key;
         if (info.dataUrl) {
@@ -408,7 +408,7 @@
       if (!curKey) return;
       if (document.getElementById("sheetMask").hidden) { stop(); return; }
       try {
-        const r = await fetch("/api/bili/qr/poll?key=" + encodeURIComponent(curKey)).then((x) => x.json());
+        const r = await fetch(apiUrl("/api/bili/qr/poll?key=" + encodeURIComponent(curKey))).then((x) => x.json());
         if (r.status === "confirmed") { stop(); setBiliLoginState(true); }
         else if (r.status === "expired") { stop(); status.textContent = "二维码已过期，点「重新生成」"; }
         else if (r.status === "scanned") { status.textContent = "已扫码，请在手机上点「确认登录」"; }
@@ -426,7 +426,7 @@
     showBuffer("加载高清流…");
     try {
       const qs = `bvid=${encodeURIComponent(s.bvid)}&cid=${encodeURIComponent(s.cid)}&qn=${s.qn || 80}`;
-      const info = await fetch("/api/bili/dash?" + qs).then((r) => r.json());
+      const info = await fetch(apiUrl("/api/bili/dash?" + qs)).then((r) => r.json());
       if (info.error) throw new Error(info.error);
       if ((s.qn || 80) >= 64 && (info.height || 0) < 720) {
         toast("当前未登录或该视频无更高画质，已回退到可用画质；登录后可解锁 1080p/4K");
@@ -453,7 +453,7 @@
   // 无 MSE 时：视频放 <video>（仅画面），音频放 <audio>（仅声音），靠 video 事件同步
   function setupDual(info) {
     teardownAudio();
-    const vurl = "/api/video?url=" + encodeURIComponent(info.video);
+    const vurl = apiUrl("/api/video?url=" + encodeURIComponent(info.video));
     video.src = vurl;
     video.playbackRate = speed;
     video.classList.toggle("mirror", mirror);
@@ -461,7 +461,7 @@
 
     audioEl = new Audio();
     audioEl.preload = "auto";
-    audioEl.src = "/api/video?url=" + encodeURIComponent(info.audio);
+    audioEl.src = apiUrl("/api/video?url=" + encodeURIComponent(info.audio));
     video.addEventListener("play", onVPlay);
     video.addEventListener("pause", onVPause);
     video.addEventListener("seeking", onVSeek);
@@ -542,7 +542,7 @@
           const streams = [[make('video/mp4; codecs="' + info.vcodec + '"'), info.video]];
           if (info.audio) streams.push([make('audio/mp4; codecs="' + info.acodec + '"'), info.audio]);
           for (const [sb, url] of streams) {
-            const purl = "/api/video?url=" + encodeURIComponent(url);
+            const purl = apiUrl("/api/video?url=" + encodeURIComponent(url));
             const buf = await fetch(purl).then((r) => {
               if (!r.ok) throw new Error("媒体下载失败 " + r.status);
               return r.arrayBuffer();
@@ -624,7 +624,7 @@
         if (!url) return toast("请粘贴 B 站链接");
         toast("正在解析 B 站视频…");
         try {
-          const meta = await fetch("/api/bili/meta?url=" + encodeURIComponent(url)).then((r) => r.json());
+          const meta = await fetch(apiUrl("/api/bili/meta?url=" + encodeURIComponent(url))).then((r) => r.json());
           if (meta.error) throw new Error(meta.error);
           const rec = {
             id: uid(),

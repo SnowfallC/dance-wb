@@ -38,6 +38,17 @@
     return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
   }
 
+  // EdgeOne 预览链接会使用短期令牌保护站点；同源接口请求需继承该令牌。
+  function apiUrl(path) {
+    const url = new URL(path, window.location.origin);
+    const previewParams = new URLSearchParams(window.location.search);
+    for (const key of ["eo_token", "eo_time"]) {
+      const value = previewParams.get(key);
+      if (value) url.searchParams.set(key, value);
+    }
+    return url.pathname + url.search;
+  }
+
   let toastTimer = null;
   function toast(msg, ms) {
     const t = document.getElementById("toast");
@@ -92,5 +103,5 @@
     });
   }
 
-  App.util = { el, uid, fmt, toast, openSheet, closeSheet, confirmSheet };
+  App.util = { el, uid, fmt, apiUrl, toast, openSheet, closeSheet, confirmSheet };
 })();
