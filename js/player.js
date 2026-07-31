@@ -1,7 +1,7 @@
 /* player.js —— 播放器：源/倍速/镜面/AB循环/节拍器/AI节拍/笔记/导出 */
 (function () {
   const App = (window.App = window.App || {});
-  const { el, uid, fmt, apiUrl, toast, openSheet } = App.util;
+  const { el, uid, fmt, apiUrl, toast, openSheet, confirmSheet } = App.util;
 
   let video, curSource = null, objectUrl = null;
   let audioEl = null; // 无 MSE 时：音频单独播放，与 video 同步
@@ -16,6 +16,10 @@
 
   let metro = { ctx: null, on: false, bpm: 120, next: 0, timer: null, count: 0, voiceVol: 1 };
   let exportState = null;
+  let exportDownloadUrl = null;
+  let wasmRuntime = null;
+  let wasmLoadingRuntime = null;
+  let wasmExportActive = false;
 
   function init() {
     video = document.getElementById("mainVideo");
@@ -171,7 +175,7 @@
     document.getElementById("aiBeatBtn").onclick = aiDetect;
 
     // 导出
-    document.getElementById("exportBtn").onclick = startExport;
+    document.getElementById("exportBtn").onclick = openExportPicker;
     document.getElementById("exportStop").onclick = stopExport;
 
     // 全屏
@@ -1033,7 +1037,211 @@
     return audioDest.stream;
   }
 
-  function startExport() {
+  function openExportPicker() {
+    if (!video.src) return toast("请先选择视频");
+    if (!video.videoWidth) return toast("视频尚未加载完成");
+
+    const fastDownload = el("button", {
+      class: "btn sm",
+      text: "⚡ 原视频快速下载",
+      onclick: () => {
+        App.util.closeSheet();
+        downloadOriginal();
+      },
+    });
+    const realtimeExport = el("button", {
+      class: "btn soft sm",
+      text: "🎬 实时渲染导出",
+      onclick: () => {
+        App.util.closeSheet();
+        startRealtimeExport();
+      },
+    });
+    const wasmExport = el("button", {
+      class: "btn soft sm",
+      text: "🚀 FFmpeg 加速导出",
+      onclick: () => chooseWasmExport(),
+    });
+    openSheet("选择导出方式", el("div", {}, [
+      el("p", { class: "hint", text: "⚡ 原视频快速下载：不应用镜像、AB 截取或分辨率设置，几乎无需等待。" }),
+      el("p", { class: "hint", text: "🎬 实时渲染导出：应用镜像、AB 截取与分辨率设置；录制时长约等于导出片段时长。" }),
+      el("p", { class: "hint", text: "🚀 FFmpeg 加速导出：首次下载约 31 MB 的本地处理组件，短片段更快；处理不会上传视频。" }),
+      el("div", { class: "controls" }, [fastDownload, realtimeExport, wasmExport]),
+    ]));
+  }
+
+  async function chooseWasmExport() {
+    App.util.closeSheet();
+    const ok = await confirmSheet(
+      "载入 FFmpeg 加速组件",
+      "首次使用将从本站下载约 31 MB 的组件，并仅在当前浏览器处理视频。长视频或低内存手机可能较慢，建议优先导出短 AB 片段。",
+      "下载并开始"
+    );
+    if (ok) startWasmExport();
+  }
+
+  function downloadOriginal() {
+    let href = "";
+    if (curSource && curSource.type === "file") href = video.currentSrc;
+    else if (curSource && curSource.type === "bili") href = sourceSrc(curSource);
+    else if (curSource && curSource.type === "url") href = curSource.url;
+    if (!href) return toast("当前视频无法快速下载");
+
+    const link = document.createElement("a");
+    link.href = href;
+    const originalName = curSource.name || "原视频";
+    link.download = /\.[a-z0-9]{2,5}$/i.test(originalName)
+      ? originalName
+      : originalName + (curSource.type === "bili" ? ".mp4" : "");
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    toast("已开始原视频下载");
+  }
+
+  function getExportFileName(extension) {
+    const name = (curSource && curSource.name) || "导出视频";
+    const stem = name.replace(/\.[a-z0-9]{2,5}$/i, "");
+    return stem + extension;
+  }
+
+  function setExportDownload(blob, fileName) {
+    if (exportDownloadUrl) URL.revokeObjectURL(exportDownloadUrl);
+    exportDownloadUrl = URL.createObjectURL(blob);
+    const download = document.getElementById("exportDl");
+    download.href = exportDownloadUrl;
+    download.download = fileName;
+    download.hidden = false;
+  }
+
+  function setExportBusy(message) {
+    document.getElementById("exportBtn").disabled = true;
+    document.getElementById("exportStop").hidden = false;
+    document.getElementById("exportProgress").hidden = false;
+    document.getElementById("exportPct").textContent = message;
+    document.getElementById("exportDl").hidden = true;
+  }
+
+  function clearExportBusy() {
+    document.getElementById("exportBtn").disabled = false;
+    document.getElementById("exportStop").hidden = true;
+    document.getElementById("exportProgress").hidden = true;
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) {
+        if (window.FFmpegWASM) resolve();
+        else existing.addEventListener("load", resolve, { once: true });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("FFmpeg 组件加载失败"));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function getWasmRuntime() {
+    if (wasmRuntime && wasmRuntime.loaded) return wasmRuntime;
+    const baseUrl = new URL("./js/vendor/ffmpeg/", window.location.href);
+    setExportBusy("正在载入 FFmpeg 组件…");
+    await loadScript(new URL("ffmpeg.js", baseUrl).href);
+    const FFmpeg = window.FFmpegWASM && window.FFmpegWASM.FFmpeg;
+    if (!FFmpeg) throw new Error("当前浏览器无法初始化 FFmpeg");
+    const runtime = new FFmpeg();
+    wasmLoadingRuntime = runtime;
+    runtime.on("progress", ({ progress }) => {
+      if (!wasmExportActive || !Number.isFinite(progress)) return;
+      document.getElementById("exportPct").textContent = "正在快速导出… " + Math.round(progress * 100) + "%";
+    });
+    await runtime.load({
+      coreURL: new URL("core/ffmpeg-core.js", baseUrl).href,
+      wasmURL: new URL("core/ffmpeg-core.wasm", baseUrl).href,
+    });
+    wasmRuntime = runtime;
+    wasmLoadingRuntime = null;
+    return runtime;
+  }
+
+  async function getWasmInput() {
+    const name = "input.mp4";
+    if (curSource && curSource.type === "file") {
+      return { name, data: new Uint8Array(await curSource.blob.arrayBuffer()) };
+    }
+    const sourceUrl = curSource && curSource.type === "bili" ? sourceSrc(curSource) : curSource && curSource.url;
+    if (!sourceUrl) throw new Error("当前视频无法交给 FFmpeg 处理");
+    const response = await fetch(sourceUrl);
+    if (!response.ok) throw new Error("视频读取失败（" + response.status + "）");
+    const data = new Uint8Array(await response.arrayBuffer());
+    if (data.byteLength > 250 * 1024 * 1024) {
+      throw new Error("视频超过 250 MB，手机浏览器内存风险较高，请改用实时渲染或原视频下载");
+    }
+    return { name, data };
+  }
+
+  async function startWasmExport() {
+    if (!video.src || !video.videoWidth || wasmExportActive) return;
+    wasmExportActive = true;
+    setExportBusy("正在准备 FFmpeg 加速导出…");
+    let runtime = null;
+    let inputName = "";
+    const outputName = "output.mp4";
+    try {
+      runtime = await getWasmRuntime();
+      if (!wasmExportActive) return;
+      document.getElementById("exportPct").textContent = "正在读取视频到浏览器内存…";
+      const input = await getWasmInput();
+      if (!wasmExportActive) return;
+      inputName = input.name;
+      await runtime.writeFile(inputName, input.data);
+
+      const args = [];
+      const useAB = document.getElementById("exportAB").checked && aTime != null && bTime != null;
+      if (useAB) {
+        const start = Math.min(aTime, bTime);
+        const duration = Math.max(aTime, bTime) - start;
+        args.push("-ss", start.toFixed(3), "-t", duration.toFixed(3));
+      }
+      args.push("-i", inputName);
+      const filters = [];
+      if (document.getElementById("exportMirror").checked) filters.push("hflip");
+      const res = document.getElementById("exportRes").value;
+      if (res !== "orig") filters.push("scale=-2:" + res);
+      if (filters.length) {
+        args.push("-vf", filters.join(","), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac");
+      } else {
+        args.push("-c", "copy");
+      }
+      args.push("-movflags", "+faststart", outputName);
+      document.getElementById("exportPct").textContent = "FFmpeg 正在处理视频…";
+      await runtime.exec(args);
+      if (!wasmExportActive) return;
+      const output = await runtime.readFile(outputName);
+      setExportDownload(new Blob([output], { type: "video/mp4" }), getExportFileName(".mp4"));
+      toast("FFmpeg 导出完成，可下载");
+    } catch (error) {
+      if (wasmExportActive) toast("FFmpeg 导出失败：" + error.message);
+    } finally {
+      if (wasmLoadingRuntime) {
+        wasmLoadingRuntime.terminate();
+        wasmLoadingRuntime = null;
+      }
+      if (runtime && inputName) {
+        try { await runtime.deleteFile(inputName); } catch (_) {}
+        try { await runtime.deleteFile(outputName); } catch (_) {}
+      }
+      if (wasmExportActive) {
+        wasmExportActive = false;
+        clearExportBusy();
+      }
+    }
+  }
+
+  function startRealtimeExport() {
     if (!video.src) return toast("请先选择视频");
     if (!video.videoWidth) return toast("视频尚未加载完成");
     const canvas = document.createElement("canvas");
@@ -1069,11 +1277,7 @@
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
       const blob = new Blob(chunks, { type: mime.split(";")[0] });
-      const url = URL.createObjectURL(blob);
-      const dl = document.getElementById("exportDl");
-      dl.href = url;
-      dl.download = (curSource ? curSource.name : "export") + (mime.includes("mp4") ? ".mp4" : ".webm");
-      dl.hidden = false;
+      setExportDownload(blob, getExportFileName(mime.includes("mp4") ? ".mp4" : ".webm"));
       document.getElementById("exportProgress").hidden = true;
       document.getElementById("exportBtn").disabled = false;
       document.getElementById("exportStop").hidden = true;
@@ -1121,6 +1325,16 @@
   }
 
   function stopExport() {
+    if (wasmExportActive) {
+      wasmExportActive = false;
+      const runtime = wasmRuntime || wasmLoadingRuntime;
+      if (runtime) runtime.terminate();
+      wasmRuntime = null;
+      wasmLoadingRuntime = null;
+      clearExportBusy();
+      toast("已取消 FFmpeg 导出");
+      return;
+    }
     if (exportState && exportState.state === "recording") exportState.stop();
   }
 

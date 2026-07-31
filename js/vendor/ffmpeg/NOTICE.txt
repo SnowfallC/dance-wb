@@ -1,0 +1,11 @@
+FFmpeg WASM 第三方组件说明
+
+本目录包含以下未修改的浏览器端组件：
+
+- @ffmpeg/ffmpeg 0.12.15（MIT）：ffmpeg.js、814.ffmpeg.js
+  源码：https://github.com/ffmpegwasm/ffmpeg.wasm
+- @ffmpeg/core 0.12.10 单线程核心（GPL-2.0-or-later）：core/ffmpeg-core.js、core/ffmpeg-core.wasm
+  源码：https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10
+  许可证：https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+这些组件仅在用户主动选择“FFmpeg 加速导出”后由浏览器载入，视频处理在用户设备完成。
