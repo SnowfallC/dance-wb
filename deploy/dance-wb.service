@@ -1,0 +1,20 @@
+# systemd 服务模板（VPS 长期运行用）
+# 用法：
+#   1) 把本项目放到 /opt/dance-wb
+#   2) 改下面 WorkingDirectory / ExecStart 路径与你的 python 路径
+#   3) sudo cp deploy/dance-wb.service /etc/systemd/system/
+#   4) sudo systemctl daemon-reload && sudo systemctl enable --now dance-wb
+[Unit]
+Description=舞刀 Dance Workbench
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dance-wb
+ExecStart=/usr/bin/python3 /opt/dance-wb/serve.py 8000
+Restart=always
+RestartSec=3
+User=www-data
+
+[Install]
+WantedBy=multi-user.target

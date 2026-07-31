@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="blade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFE4EA"/>
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="20" stdDeviation="30" flood-color="#E31B45" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="675" fill="#F4F4F6"/>
+  <g transform="translate(600 260)">
+    <rect x="-140" y="-140" width="280" height="280" rx="72" fill="#FF2D55" filter="url(#shadow)"/>
+    <g transform="rotate(-14 0 0)">
+      <path d="M-76 -140 Q0 -20 0 0 Q0 -20 76 -140 L44 -140 Q0 -40 0 -40 Q0 -40 -44 -140 Z" fill="url(#blade)"/>
+      <circle cx="0" cy="0" r="16" fill="#FFFFFF"/>
+      <path d="M-40 20 Q-66 70 -76 100" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" fill="none"/>
+      <path d="M40 20 Q66 70 76 100" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" fill="none"/>
+      <circle cx="-76" cy="112" r="26" stroke="#FFFFFF" stroke-width="14" fill="none"/>
+      <circle cx="76" cy="112" r="26" stroke="#FFFFFF" stroke-width="14" fill="none"/>
+    </g>
+  </g>
+  <text x="600" y="510" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,PingFang SC,Microsoft YaHei,sans-serif" font-size="52" font-weight="800" fill="#111114" letter-spacing="4">舞刀</text>
+  <text x="600" y="555" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,PingFang SC,Microsoft YaHei,sans-serif" font-size="18" font-weight="600" fill="#8A8A90" letter-spacing="2">练舞工作台</text>
+</svg>

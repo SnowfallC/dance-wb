@@ -1,0 +1,14 @@
+{
+  "name": "舞刀",
+  "short_name": "舞刀",
+  "description": "视频练习 · 收藏 · 日历 · AA 分账",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#F4F4F6",
+  "background_color": "#F4F4F6",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

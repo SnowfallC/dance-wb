@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#F4F4F6" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <title>舞刀</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+      <div class="brand">
+        <span class="logo">✂️</span>
+        <div>
+          <h1>舞刀</h1>
+          <p id="brandSub">练舞工作台 · 视频 · 收藏 · 日历 · 分账</p>
+        </div>
+      </div>
+  </header>
+
+  <main id="view">
+    <!-- 0. 首页 -->
+    <section class="tab" id="tab-home">
+      <div class="card ink">
+        <div class="home-greet" id="homeGreet">
+          你好 ✨
+          <small id="homeDate">—</small>
+        </div>
+        <div class="hint" id="homeQuote">今天也要跳得很帅</div>
+        <button class="btn ghost sm" id="homeContinue" style="margin-top:12px">▶ 继续练习</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ic">😊</span>心情签到</div>
+        <div class="home-mood" id="homeMood">
+          <button class="mood-btn" data-m="🔥"><span>🔥</span>超燃</button>
+          <button class="mood-btn" data-m="😌"><span>😌</span>平静</button>
+          <button class="mood-btn" data-m="🥵"><span>🥵</span>累了</button>
+          <button class="mood-btn" data-m="💪"><span>💪</span>有劲</button>
+          <button class="mood-btn" data-m="🥲"><span>🥲</span>emo</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ic">⚡</span>快捷入口</div>
+        <div class="quick-grid" id="homeQuick">
+          <button class="quick-item" data-go="player|pickSourceBtn"><span class="ic-badge pink">📂</span>选视频</button>
+          <button class="quick-item" data-go="player|addNoteBtn"><span class="ic-badge mint">📝</span>记笔记</button>
+          <button class="quick-item" data-go="player|metroBtn"><span class="ic-badge brown">🎵</span>节拍器</button>
+          <button class="quick-item" data-go="player|exportBtn"><span class="ic-badge pink">⬇️</span>导出</button>
+          <button class="quick-item" data-go="favorites|newFavBtn"><span class="ic-badge mint">📁</span>收藏</button>
+          <button class="quick-item" data-go="calendar|addEventBtn"><span class="ic-badge brown">📅</span>日历</button>
+          <button class="quick-item" data-go="split"><span class="ic-badge pink">🧮</span>分账</button>
+          <button class="quick-item" data-go="player|pickSourceBtn" id="homeBiliBtn"><span class="ic-badge ink">🅑</span>B站登录</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ic">📅</span>今日安排 <button class="btn soft sm act" id="homeMoreEvents">更多</button></div>
+        <div class="home-events" id="homeEvents">
+          <div class="home-ev"><span class="t">暂无安排</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ic">📊</span>练习数据</div>
+        <div class="home-stats" id="homeStats">
+          <div class="stat-card"><span class="n" id="statFavs">0</span><span class="l">收藏夹</span></div>
+          <div class="stat-card"><span class="n" id="statVids">0</span><span class="l">视频</span></div>
+          <div class="stat-card"><span class="n" id="statEvents">0</span><span class="l">本月安排</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. 播放器 -->
+    <section class="tab hidden" id="tab-player">
+      <div class="card">
+        <div class="source-row">
+          <span id="curSource" class="source-name">尚未选择视频</span>
+          <button class="btn soft sm" id="pickSourceBtn">📂 选择视频源</button>
+        </div>
+        <div class="controls" id="qnRow" hidden>
+          <label class="mini">📺 清晰度
+            <select id="biliQn">
+              <option value="16">360p（省流）</option>
+              <option value="32">480p（流畅）</option>
+              <option value="64">720p</option>
+              <option value="80">1080p（高清）</option>
+              <option value="112">1080p+（高码率）</option>
+              <option value="120">2160p（4K）</option>
+            </select>
+          </label>
+          <span class="hint" id="qnHint"></span>
+        </div>
+        <div class="video-wrap" id="videoWrap">
+          <video id="mainVideo" playsinline webkit-playsinline></video>
+          <div class="danmaku" id="danmaku"></div>
+          <button class="icon-btn fs" id="fsBtn" title="全屏">⛶</button>
+          <div class="buffer-overlay" id="bufferOverlay" hidden>
+            <div class="spinner"></div>
+            <div class="buffer-text" id="bufferText">加载中…</div>
+          </div>
+        </div>
+
+        <div class="progress" id="progress">
+          <div class="progress-fill" id="progressFill"></div>
+          <div class="ab-region" id="abRegion"></div>
+          <div class="ab-handle a" id="abA" title="A 点">A</div>
+          <div class="ab-handle b" id="abB" title="B 点">B</div>
+          <div class="playhead" id="playhead"></div>
+          <div class="seek-tip" id="seekTip">00:00</div>
+        </div>
+        <div class="time-row">
+          <span id="curTime">00:00</span>
+          <span id="durTime">00:00</span>
+        </div>
+
+        <div class="controls main-ctrl">
+          <button class="icon-btn" id="mirrorBtn" title="镜像">🪞</button>
+          <button class="btn round lg" id="playBtn">▶</button>
+          <button class="icon-btn" id="fsBtn2" title="全屏">⛶</button>
+          <span id="speedLabel" class="speed-label">1.0×</span>
+        </div>
+
+        <div class="controls speed-group" id="speedGroup">
+          <button class="chip" data-spd="0.25">0.25×</button>
+          <button class="chip" data-spd="0.5">0.5×</button>
+          <button class="chip" data-spd="0.75">0.75×</button>
+          <button class="chip active" data-spd="1">1×</button>
+        </div>
+
+        <div class="tool-row">
+          <button class="tool-btn" id="setA"><span class="e">🅰</span>设 A 点</button>
+          <button class="tool-btn" id="setB"><span class="e">🅱</span>设 B 点</button>
+          <button class="tool-btn" id="clearAB"><span class="e">🚫</span>清除 AB</button>
+          <button class="tool-btn" id="addNoteBtn"><span class="e">📝</span>加笔记</button>
+        </div>
+      </div>
+
+      <!-- 节拍器 -->
+      <div class="card">
+        <div class="card-title"><span class="ic">🎵</span>节拍器</div>
+        <div class="metro">
+          <div class="beat-dot" id="beatDot">1</div>
+          <div class="metro-ctrl">
+            <label class="mini">BPM
+              <input type="number" id="bpmInput" value="120" min="30" max="240" />
+            </label>
+            <input type="range" id="bpmRange" min="30" max="240" value="120" />
+            <label class="mini">起始拍
+              <select id="beatStart">
+                <option>1</option><option>2</option><option>3</option><option>4</option>
+                <option>5</option><option>6</option><option>7</option><option>8</option>
+              </select>
+            </label>
+            <label class="mini">🔈 节拍器人声
+              <input type="range" id="metroVol" min="0" max="1" step="0.05" value="1" />
+            </label>
+            <div class="controls">
+              <button class="btn sm" id="metroBtn">▶ 开始</button>
+              <button class="btn soft sm" id="aiBeatBtn">🤖 AI 检测节拍</button>
+            </div>
+            <div class="hint" id="aiHint"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 导出 -->
+      <div class="card">
+        <div class="card-title"><span class="ic">⬇️</span>导出视频</div>
+        <div class="opts">
+          <label>分辨率
+            <select id="exportRes">
+              <option value="orig">原始画质</option>
+              <option value="360">360p</option>
+              <option value="480">480p</option>
+              <option value="720">720p</option>
+              <option value="1080">1080p</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="exportMirror" /> 导出时镜像</label>
+          <label class="check"><input type="checkbox" id="exportAB" checked /> 仅导出 AB 段</label>
+        </div>
+        <div class="controls">
+          <button class="btn" id="exportBtn">⤓ 开始导出</button>
+          <button class="btn soft sm" id="exportStop" hidden>⏹ 停止</button>
+        </div>
+        <div class="export-progress" id="exportProgress" hidden>
+          <div class="bar"><div class="fill" id="exportFill"></div></div>
+          <span id="exportPct">录制中…</span>
+        </div>
+        <a id="exportDl" class="btn soft sm block" download hidden>⬇ 下载导出视频</a>
+        <div class="hint">导出会按当前倍速/镜像录制画布，手机上建议在 WorkBuddy 工作台内操作。</div>
+      </div>
+
+      <!-- 笔记时间轴 -->
+      <div class="card">
+        <div class="card-title"><span class="ic">📝</span>笔记时间轴</div>
+        <div class="notes-track" id="notesTrack"></div>
+        <div class="hint" id="notesHint">点「📝 加笔记」在时间轴添加要注意的提示；播放时它会直接停在画面上方几秒，也可左右拖动改时间、上下拖动换位置。下方进度条可长按拖动，并实时显示时间点。</div>
+      </div>
+    </section>
+
+    <!-- 2. 收藏夹 -->
+    <section class="tab hidden" id="tab-favorites">
+      <div class="card">
+        <div class="card-title"><span class="ic">📁</span>收藏夹 <button class="btn soft sm act" id="newFavBtn">✨ 新建</button></div>
+        <div class="fav-list" id="favList"></div>
+      </div>
+      <div class="card" id="favDetailCard" hidden>
+        <div class="card-title"><span class="ic">📂</span><span id="favDetailTitle" class="id-target"></span></div>
+        <div class="fav-plan" id="favDetailPlan"></div>
+        <div class="controls">
+          <button class="btn sm" id="addVidFile">📤 上传视频</button>
+          <button class="btn soft sm" id="addVidBili">🅑 从 B 站提取</button>
+          <button class="btn soft sm" id="addVidUrl">🔗 粘贴直链</button>
+          <input type="file" id="vidFile" accept="video/*" hidden />
+        </div>
+        <div class="vid-list" id="vidList"></div>
+      </div>
+    </section>
+
+    <!-- 3. 日历 -->
+    <section class="tab hidden" id="tab-calendar">
+      <div class="card">
+        <div class="cal-head">
+          <button class="icon-btn" id="calPrev">◀</button>
+          <span id="calTitle">—</span>
+          <button class="icon-btn" id="calNext">▶</button>
+          <button class="btn soft sm act" id="calToday">今天</button>
+        </div>
+        <div class="cal-week">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ic">📅</span><span id="calDayTitle" class="id-target">日程</span></div>
+        <div class="event-list" id="eventList"></div>
+        <button class="btn sm" id="addEventBtn">➕ 添加事项</button>
+      </div>
+    </section>
+
+    <!-- 4. 分账 -->
+    <section class="tab hidden" id="tab-split">
+      <div class="card">
+        <div class="card-title"><span class="ic">🧮</span>AA 分账</div>
+        <div class="people-row">
+          <div class="people-list" id="peopleList"></div>
+          <div>
+            <input type="text" id="peopleInput" placeholder="👥 团员名字（多个用空格分隔）" />
+            <button class="btn sm" id="addPeopleBtn">👥 加团员</button>
+          </div>
+        </div>
+        <div class="opts">
+          <input type="number" id="expAmount" placeholder="💰 金额" min="0" step="0.01" inputmode="decimal" />
+          <input type="text" id="expContent" placeholder="📝 内容（如 场地费）" />
+          <button class="btn sm" id="addExpBtn">📒 记一笔</button>
+        </div>
+        <div class="exp-list" id="expList"></div>
+        <div class="split-result" id="splitResult"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 底部导航 -->
+  <nav class="tabbar">
+    <button class="tabbtn active" data-tab="home"><span>🏠</span>首页</button>
+    <button class="tabbtn" data-tab="player"><span>🎬</span>练习</button>
+    <button class="tabbtn" data-tab="favorites"><span>📁</span>收藏</button>
+    <button class="tabbtn" data-tab="calendar"><span>📅</span>日历</button>
+    <button class="tabbtn" data-tab="split"><span>🧮</span>分账</button>
+  </nav>
+
+  <!-- 弹层 -->
+  <div class="sheet-mask" id="sheetMask" hidden>
+    <div class="sheet" id="sheet">
+      <div class="sheet-head"><span id="sheetTitle">标题</span><button class="x" id="sheetClose">✕</button></div>
+      <div class="sheet-body" id="sheetBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="./js/util.js"></script>
+  <script src="./js/store.js"></script>
+  <script src="./js/player.js"></script>
+  <script src="./js/favorites.js"></script>
+  <script src="./js/calendar.js"></script>
+  <script src="./js/split.js"></script>
+  <script src="./js/home.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>

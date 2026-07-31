@@ -1,0 +1,18 @@
+# Caddy 反代模板（VPS + 域名，自动申请 HTTPS）
+# 前提：域名 A 记录已指向该 VPS；80/443 端口放行
+# 用法：把 dance.example.com 换成你的域名，然后 `caddy run --config deploy/Caddyfile`
+dance.example.com {
+    # 反向代理到本地 serve.py（保持 WebSocket/长连接）
+    reverse_proxy localhost:8000
+
+    # 大文件/视频流：放宽超时与上传体
+    header {
+        # 允许 PWA 安装所需的跨域与缓存策略已在后端设置，这里无需额外处理
+    }
+    # 视频代理可能时间较长，放宽超时
+    timeouts {
+        read_body 30s
+        read 5m
+        write 5m
+    }
+}
